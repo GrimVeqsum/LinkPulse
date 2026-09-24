@@ -1,15 +1,115 @@
 services:
+
   postgres:
     image: postgres:17
-    container_name: linkpulse-container_name
+    container_name: linkpulse-postgres
 
     environment:
-      - POSTGRES_USER: postgres
-      - POSTGRES_PASSWORD: postgres
-      - POSTGRES_DB: linkpulse
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: linkpulse
 
     ports:
-       - "5432:5432"
+      - "5432:5432"
 
     volumes:
       - postgres_data:/var/lib/postgresql/data
+
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U postgres -d linkpulse"
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:26.8.6.5
+    container_name: linkpulse-clickhouse
+
+    environment:
+      CLICKHOUSE_DB: linkpulse
+      CLICKHOUSE_USER: linkpulse
+      CLICKHOUSE_PASSWORD: linkpulse
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "clickhouse-client",
+          "--user",
+          "linkpulse",
+          "--password",
+          "linkpulse",
+          "--query",
+          "SELECT 1"
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+
+  analytics-service:
+    build:
+      context: .
+      args:
+        SERVICE: analytics-service
+
+    container_name: linkpulse-analytics
+
+    environment:
+      GRPC_PORT: "9090"
+
+      CLICKHOUSE_ADDR: "clickhouse:9000"
+      CLICKHOUSE_DATABASE: "linkpulse"
+      CLICKHOUSE_USER: "linkpulse"
+      CLICKHOUSE_PASSWORD: "linkpulse"
+
+    ports:
+      - "9090:9090"
+
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+
+
+  link-service:
+    build:
+      context: .
+      args:
+        SERVICE: link-service
+
+    container_name: linkpulse-link
+
+    environment:
+      HTTP_PORT: "8080"
+
+      POSTGRES_URL: "postgres://postgres:postgres@postgres:5432/linkpulse?sslmode=disable"
+
+      ANALYTICS_GRPC_ADDR: "analytics-service:9090"
+
+    ports:
+      - "8080:8080"
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+      analytics-service:
+        condition: service_started
+
+
+volumes:
+  postgres_data:
+  clickhouse_data:

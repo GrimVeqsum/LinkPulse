@@ -6,7 +6,10 @@ import (
 	"net/http"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 
+	analyticsclient "linkpulse/internal/analytics/client"
 	"linkpulse/internal/config"
 	"linkpulse/internal/link/handler"
 	"linkpulse/internal/link/repository"
@@ -15,30 +18,58 @@ import (
 )
 
 func main() {
-	cfg, err := config.Load()
+	cfg, err := config.LoadLink()
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	ctx := context.Background()
 
-	pool, err := pgxpool.New(ctx, cfg.PostgresURL)
+	pool, err := pgxpool.New(
+		ctx,
+		cfg.PostgresURL,
+	)
 	if err != nil {
-		log.Fatal("failed to create postgres pool: ", err)
+		log.Fatal(err)
 	}
 	defer pool.Close()
 
 	if err := pool.Ping(ctx); err != nil {
-		log.Fatal("failed to connect to postgres: ", err)
+		log.Fatal(err)
 	}
 
-	if err := migrations.Up(ctx, pool); err != nil {
-		log.Fatal("failed to run migrations: ", err)
+	if err := migrations.UpPostgres(
+		ctx,
+		pool,
+	); err != nil {
+		log.Fatal(err)
 	}
 
-	linkRepository := repository.NewPostgresRepository(pool)
-	linkService := service.New(linkRepository)
-	linkHandler := handler.New(linkService)
+	grpcConnection, err := grpc.NewClient(
+		cfg.AnalyticsGRPCAddr,
+		grpc.WithTransportCredentials(
+			insecure.NewCredentials(),
+		),
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer grpcConnection.Close()
+
+	analyticsClient := analyticsclient.New(
+		grpcConnection,
+	)
+
+	linkRepository :=
+		repository.NewPostgresRepository(pool)
+
+	linkService :=
+		service.New(linkRepository)
+
+	linkHandler := handler.New(
+		linkService,
+		analyticsClient,
+	)
 
 	mux := http.NewServeMux()
 
@@ -49,7 +80,10 @@ func main() {
 		Handler: mux,
 	}
 
-	log.Printf("server started on :%s", cfg.HTTPPort)
+	log.Printf(
+		"link service started on :%s",
+		cfg.HTTPPort,
+	)
 
 	if err := server.ListenAndServe(); err != nil {
 		log.Fatal(err)

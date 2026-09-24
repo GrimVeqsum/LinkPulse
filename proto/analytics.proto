@@ -1,0 +1,34 @@
+syntax = "proto3";
+
+package analytics.v1;
+
+option go_package = "linkpulse/gen/analytics/v1;analyticsv1";
+
+import "google/protobuf/timestamp.proto";
+
+service AnalyticsService {
+  rpc TrackClick(TrackClickRequest) returns (TrackClickResponse);
+
+  rpc GetLinkStats(GetLinkStatsRequest) returns (GetLinkStatsResponse);
+}
+
+message TrackClickRequest {
+  int64 link_id = 1;
+  string code = 2;
+  string user_agent = 3;
+  string referer = 4;
+  google.protobuf.Timestamp occurred_at = 5;
+}
+
+message TrackClickResponse {
+  bool success = 1;
+}
+
+message GetLinkStatsRequest {
+  int64 link_id = 1;
+}
+
+message GetLinkStatsResponse {
+  uint64 total_clicks = 1;
+  uint64 today_clicks = 2;
+}
