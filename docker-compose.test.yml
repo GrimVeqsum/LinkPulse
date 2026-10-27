@@ -1,0 +1,94 @@
+# Independent test environment: no developer database and no persistent volumes.
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: linkpulse_test
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d linkpulse_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:26.8.6.5
+    environment:
+      CLICKHOUSE_DB: linkpulse_test
+      CLICKHOUSE_USER: linkpulse
+      CLICKHOUSE_PASSWORD: linkpulse
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    tmpfs:
+      - /var/lib/clickhouse
+      - /var/log/clickhouse-server
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--user", "linkpulse", "--password", "linkpulse", "--query", "SELECT 1"]
+      interval: 2s
+      timeout: 3s
+      retries: 40
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+
+  analytics-service:
+    build:
+      context: .
+      args:
+        SERVICE: analytics-service
+    environment:
+      GRPC_PORT: "9090"
+      CLICKHOUSE_ADDR: clickhouse:9000
+      CLICKHOUSE_DATABASE: linkpulse_test
+      CLICKHOUSE_USER: linkpulse
+      CLICKHOUSE_PASSWORD: linkpulse
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/app/app", "healthcheck"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    stop_grace_period: 25s
+
+  link-service:
+    build:
+      context: .
+      args:
+        SERVICE: link-service
+    environment:
+      HTTP_PORT: "8080"
+      POSTGRES_URL: postgres://postgres:postgres@postgres:5432/linkpulse_test?sslmode=disable
+      ANALYTICS_GRPC_ADDR: analytics-service:9090
+    ports:
+      - "127.0.0.1:${TEST_HTTP_PORT:-18080}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      analytics-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/app/app", "healthcheck"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    stop_grace_period: 25s
+
+  tests:
+    build:
+      context: .
+      target: integration-tests
+    environment:
+      TEST_POSTGRES_URL: postgres://postgres:postgres@postgres:5432/linkpulse_test?sslmode=disable
+      TEST_CLICKHOUSE_ADDR: clickhouse:9000
+      TEST_CLICKHOUSE_DATABASE: linkpulse_test
+      TEST_CLICKHOUSE_USER: linkpulse
+      TEST_CLICKHOUSE_PASSWORD: linkpulse
+      TEST_HTTP_URL: http://link-service:8080
+    depends_on:
+      link-service:
+        condition: service_healthy

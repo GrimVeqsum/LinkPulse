@@ -5,10 +5,13 @@ import (
 	"database/sql"
 	"embed"
 	"fmt"
+	"io/fs"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3"
+	"github.com/pressly/goose/v3/lock"
 )
 
 //go:embed postgres/*.sql
@@ -21,20 +24,24 @@ func UpPostgres(
 	ctx context.Context,
 	pool *pgxpool.Pool,
 ) error {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
 	db := stdlib.OpenDBFromPool(pool)
 	defer db.Close()
-
-	goose.SetBaseFS(postgresFiles)
-
-	if err := goose.SetDialect("postgres"); err != nil {
-		return fmt.Errorf("set postgres dialect: %w", err)
+	files, err := fs.Sub(postgresFiles, "postgres")
+	if err != nil {
+		return err
 	}
-
-	if err := goose.UpContext(
-		ctx,
-		db,
-		"postgres",
-	); err != nil {
+	locker, err := lock.NewPostgresSessionLocker()
+	if err != nil {
+		return fmt.Errorf("postgres migration lock: %w", err)
+	}
+	provider, err := goose.NewProvider(goose.DialectPostgres, db, files,
+		goose.WithDisableGlobalRegistry(true), goose.WithSessionLocker(locker))
+	if err != nil {
+		return fmt.Errorf("postgres migration provider: %w", err)
+	}
+	if _, err := provider.Up(ctx); err != nil {
 		return fmt.Errorf("postgres migrations: %w", err)
 	}
 
@@ -45,17 +52,17 @@ func UpClickHouse(
 	ctx context.Context,
 	db *sql.DB,
 ) error {
-	goose.SetBaseFS(clickHouseFiles)
-
-	if err := goose.SetDialect("clickhouse"); err != nil {
-		return fmt.Errorf("set clickhouse dialect: %w", err)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	files, err := fs.Sub(clickHouseFiles, "clickhouse")
+	if err != nil {
+		return err
 	}
-
-	if err := goose.UpContext(
-		ctx,
-		db,
-		"clickhouse",
-	); err != nil {
+	provider, err := goose.NewProvider(goose.DialectClickHouse, db, files, goose.WithDisableGlobalRegistry(true))
+	if err != nil {
+		return fmt.Errorf("clickhouse migration provider: %w", err)
+	}
+	if _, err := provider.Up(ctx); err != nil {
 		return fmt.Errorf("clickhouse migrations: %w", err)
 	}
 

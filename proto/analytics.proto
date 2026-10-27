@@ -18,6 +18,8 @@ message TrackClickRequest {
   string user_agent = 3;
   string referer = 4;
   google.protobuf.Timestamp occurred_at = 5;
+  // Immutable delivery identity, preserved across outbox retries.
+  string event_id = 6;
 }
 
 message TrackClickResponse {

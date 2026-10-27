@@ -6,8 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"net/netip"
 	"net/url"
+	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"linkpulse/internal/link/model"
 	"linkpulse/internal/link/repository"
@@ -16,6 +20,7 @@ import (
 const (
 	codeLength          = 6
 	maxGenerateAttempts = 5
+	maxURLLength        = 8192
 )
 
 const alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
@@ -23,12 +28,14 @@ const alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789
 var ErrInvalidURL = errors.New("invalid url")
 
 type Service struct {
-	repository repository.Repository
+	repository   repository.Repository
+	generateCode func() (string, error)
 }
 
 func New(repository repository.Repository) *Service {
 	return &Service{
-		repository: repository,
+		repository:   repository,
+		generateCode: generateCode,
 	}
 }
 
@@ -43,9 +50,16 @@ func (s *Service) CreateLink(
 	}
 
 	for i := 0; i < maxGenerateAttempts; i++ {
-		code, err := generateCode()
+		if err := ctx.Err(); err != nil {
+			return model.Link{}, err
+		}
+		code, err := s.generateCode()
 		if err != nil {
 			return model.Link{}, err
+		}
+		// /health is a reserved six-character route, so it cannot be a link.
+		if code == "health" {
+			continue
 		}
 
 		link := model.Link{
@@ -73,7 +87,7 @@ func (s *Service) GetByCode(
 	ctx context.Context,
 	code string,
 ) (model.Link, error) {
-	if code == "" {
+	if !isValidCode(code) {
 		return model.Link{}, repository.ErrLinkNotFound
 	}
 
@@ -99,12 +113,18 @@ func generateCode() (string, error) {
 }
 
 func isValidURL(value string) bool {
+	if value == "" || len(value) > maxURLLength || !utf8.ValidString(value) || strings.ContainsFunc(value, func(r rune) bool {
+		return unicode.IsSpace(r) || unicode.IsControl(r)
+	}) {
+		return false
+	}
+
 	parsedURL, err := url.Parse(value)
 	if err != nil {
 		return false
 	}
 
-	if parsedURL.Host == "" {
+	if parsedURL.Host == "" || parsedURL.User != nil || parsedURL.Opaque != "" {
 		return false
 	}
 
@@ -112,5 +132,56 @@ func isValidURL(value string) bool {
 		return false
 	}
 
+	hostname := parsedURL.Hostname()
+	if !isValidHostname(hostname) || strings.HasSuffix(parsedURL.Host, ":") {
+		return false
+	}
+	if strings.HasPrefix(parsedURL.Host, "[") {
+		if _, err := netip.ParseAddr(hostname); err != nil {
+			return false
+		}
+	}
+	if port := parsedURL.Port(); port != "" {
+		value, err := strconv.Atoi(port)
+		if err != nil || value < 1 || value > 65535 {
+			return false
+		}
+	}
+	if strings.Contains(hostname, ":") && !strings.HasPrefix(parsedURL.Host, "[") {
+		return false
+	}
+
+	return true
+}
+
+func isValidHostname(hostname string) bool {
+	if _, err := netip.ParseAddr(hostname); err == nil {
+		return true
+	}
+	if hostname == "" || len(hostname) > 253 {
+		return false
+	}
+	for _, label := range strings.Split(strings.TrimSuffix(hostname, "."), ".") {
+		if label == "" || len(label) > 63 || strings.HasPrefix(label, "-") || strings.HasSuffix(label, "-") {
+			return false
+		}
+		for _, char := range label {
+			if !unicode.IsLetter(char) && !unicode.IsDigit(char) && char != '-' {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func isValidCode(code string) bool {
+	if len(code) != codeLength {
+		return false
+	}
+	for _, char := range code {
+		if !strings.ContainsRune(alphabet, char) {
+			return false
+		}
+	}
 	return true
 }
