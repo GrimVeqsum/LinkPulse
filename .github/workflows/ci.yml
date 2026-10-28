@@ -10,12 +10,15 @@ permissions:
 jobs:
   go:
     runs-on: ubuntu-latest
+    env:
+      GOTOOLCHAIN: local
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-go@v7.0.0
         with:
-          go-version: '1.26.8'
+          go-version-file: go.mod
           cache: true
+          cache-dependency-path: go.sum
       - name: Check formatting
         run: test -z "$(gofmt -l $(git ls-files '*.go'))"
       - name: Vet
@@ -37,7 +40,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
       - name: Start isolated databases and services
         run: docker compose -p linkpulse-integration -f docker-compose.test.yml up --build --wait postgres clickhouse analytics-service link-service
       - name: Real database integration tests

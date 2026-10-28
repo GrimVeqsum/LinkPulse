@@ -1,5 +1,7 @@
 # LinkPulse
 
+[![CI](https://github.com/GrimVeqsum/LinkPulse/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/GrimVeqsum/LinkPulse/actions/workflows/ci.yml?query=branch%3Amain)
+
 ## 1. Project overview
 
 LinkPulse is a Go URL shortener with durable, asynchronous click analytics. The HTTP service stores links and pending redirect events in PostgreSQL. A bounded worker delivers events over gRPC to the Analytics Service, which stores them in ClickHouse and provides statistics.
@@ -21,7 +23,7 @@ The project demonstrates request validation, database migrations, durable delive
 
 | Component | Implementation |
 | --- | --- |
-| Application | Go; module minimum 1.25, Docker/CI toolchain 1.26.8 |
+| Application | Go 1.25 minimum and CI (from `go.mod`); Docker toolchain 1.26.8 |
 | HTTP | Standard library `net/http` |
 | Link storage and outbox | PostgreSQL 17, pgx/v5 |
 | Analytics storage | ClickHouse 26.8.6.5, clickhouse-go/v2 |
@@ -109,7 +111,7 @@ Analytics exposes `TrackClick`, `GetLinkStats`, and standard gRPC health `Check`
 
 ## 8. Quick start
 
-Requires Docker Engine with Compose v2 or later. Standalone Go work requires Go 1.25 or later; CI uses 1.26.8. The complete recovery smoke test additionally uses Python 3.
+Requires Docker Engine with a Compose version supporting `up --wait`. Standalone Go work requires Go 1.25 or later; CI reads the version from `go.mod` and disables automatic toolchain upgrades to verify that minimum. Docker builds use Go 1.26.8. The complete recovery smoke test additionally uses Python 3.
 
 ```bash
 cp .env.example .env
@@ -168,6 +170,8 @@ These payloads illustrate the contract; they are not benchmark or verification o
 ## 10. Testing
 
 Local checks:
+
+The race detector requires CGO enabled and a C compiler (for example, GCC or Clang).
 
 ```bash
 test -z "$(gofmt -l $(git ls-files '*.go'))"
