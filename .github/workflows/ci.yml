@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.8'
+          cache: true
+      - name: Check formatting
+        run: test -z "$(gofmt -l $(git ls-files '*.go'))"
+      - name: Vet
+        run: go vet ./...
+      - name: Unit tests
+        run: go test ./...
+      - name: Race detector
+        run: go test -race ./...
+      - name: Build
+        run: go build ./...
+      - name: Validate Compose files
+        run: |
+          docker compose -f docker-compose.yml config --quiet
+          docker compose -f docker-compose.test.yml config --quiet
+      - name: Build runtime images
+        run: docker compose -f docker-compose.yml build
+
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start isolated databases and services
+        run: docker compose -p linkpulse-integration -f docker-compose.test.yml up --build --wait postgres clickhouse analytics-service link-service
+      - name: Real database integration tests
+        run: docker compose -p linkpulse-integration -f docker-compose.test.yml run --build --rm tests
+      - name: Full-stack outage recovery
+        run: python3 scripts/smoke.py --project linkpulse-integration --port 18080
+      - name: Container logs
+        if: failure()
+        run: docker compose -p linkpulse-integration -f docker-compose.test.yml logs --no-color
+      - name: Stop isolated services
+        if: always()
+        run: docker compose -p linkpulse-integration -f docker-compose.test.yml down --remove-orphans

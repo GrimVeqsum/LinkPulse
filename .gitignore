@@ -1,0 +1,22 @@
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Build and test artifacts
+*.exe
+/bin/
+/dist/
+/coverage/
+coverage.out
+*.test
+*.prof
+__pycache__/
+
+# Editor and OS files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
