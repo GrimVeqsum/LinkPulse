@@ -84,6 +84,8 @@ Existing `001` migrations remain unchanged. New `002` migrations add the outbox 
 
 Migrations run at startup with a 30-second deadline. Each goose provider has its own filesystem and dialect; PostgreSQL migrations take an advisory lock. Bootstrap ClickHouse migrations from one Analytics Service instance at a time, since its DDL/version updates are not transactionally locked across processes. Existing database volumes and migration history are preserved.
 
+Analytics retries temporary ClickHouse connection failures with delays from 100 ms up to 1 second, within the same 30-second startup/migration budget. This handles the image's loopback-only bootstrap server being marked healthy before its final listener is available. Authentication/configuration errors fail immediately; cancellation interrupts both retry waits and in-progress startup connections.
+
 To inspect a backlog without publishing PostgreSQL:
 
 ```bash

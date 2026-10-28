@@ -76,9 +76,12 @@ func run(ctx context.Context) error {
 	}
 	startupCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
+	dialContext, finishStartup := startupDialContext(startupCtx)
+	defer finishStartup()
 	db := clickhouse.OpenDB(&clickhouse.Options{
 		Addr:        []string{cfg.ClickHouseAddr},
 		Auth:        clickhouse.Auth{Database: cfg.ClickHouseDatabase, Username: cfg.ClickHouseUser, Password: cfg.ClickHousePassword},
+		DialContext: dialContext,
 		DialTimeout: 3 * time.Second, ReadTimeout: 3 * time.Second,
 		Settings:    clickhouse.Settings{"max_execution_time": 2},
 		Compression: &clickhouse.Compression{Method: clickhouse.CompressionLZ4},
@@ -87,11 +90,15 @@ func run(ctx context.Context) error {
 	db.SetMaxOpenConns(10)
 	db.SetMaxIdleConns(5)
 	db.SetConnMaxLifetime(30 * time.Minute)
-	if err := db.PingContext(startupCtx); err != nil {
+	if err := waitForClickHouse(startupCtx, db.PingContext); err != nil {
 		return fmt.Errorf("connect clickhouse: %w", err)
 	}
 	if err := migrations.UpClickHouse(startupCtx, db); err != nil {
 		return err
+	}
+	finishStartup()
+	if err := startupCtx.Err(); err != nil {
+		return fmt.Errorf("clickhouse startup: %w", err)
 	}
 	clickRepository := repository.New(db)
 	analyticsServer := grpcapi.New(clickRepository)
